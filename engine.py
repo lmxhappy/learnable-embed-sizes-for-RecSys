@@ -39,7 +39,7 @@ def setup_args(parser=None):
     data.add_argument('--device-ids-test', default=[0], help='devices used for multi-processing evaluate')
 
     regularize.add_argument('--max-steps', default=1e8)
-    regularize.add_argument('--use-cuda', default=True)
+    regularize.add_argument('--use-cuda', default=False)
     regularize.add_argument('--device-id', default=0, help='Training Devices')
 
     factorize.add_argument('--factorizer', default='fm', help='Type of the Factorization Model')
@@ -65,16 +65,23 @@ class Engine(object):
     def __init__(self, opt):
         self._opt = opt
         self._opt['data_path'] = self._opt['data_path'].format(data_type=self._opt['data_type'])
+
+        # 数据相关的
         self._sampler = setup_generator(opt)
 
+        #各个field的feature数量：[ 278    2    7   21 3439   81  301]
         self._opt['field_dims'] = self._sampler.field_dims
 
+        # 存储model训练的embed
+        # './tmp/embedding/fm/ml-1m/FM_test_BaseDim32_bsz1024_lr_0.001_optim_adam_thresholdTypeFEATURE_DIM_thres_init-15_sigmoid-1_l2_penalty0/{num_parameter}'
         self._opt['emb_save_path'] = self._opt['emb_save_path'].format(
             factorizer=self._opt['factorizer'],
-            data_type=self._opt['data_type'],
-            alias=self._opt['alias'],
+            data_type=self._opt['data_type'], #'ml-1m'
+            alias=self._opt['alias'], # FM_test_BaseDim32_bsz1024_lr_0.001_optim_adam_thresholdTypeFEATURE_DIM_thres_init-15_sigmoid-1_l2_penalty0'
             num_parameter='{num_parameter}'
         )
+
+        # retrain
         if 'retrain_emb_param' in opt:
             self.retrain = True
             if opt['re_init']:
@@ -83,19 +90,27 @@ class Engine(object):
                 self._opt['alias'] += '_reinitFalse'
             self._opt['alias'] += '_retrain_emb_param{}'.format(opt['retrain_emb_param'])
         else:
+            # 不是retrain
             self.retrain = False
-            self.candidate_p = self._opt.get('candidate_p')
+            self.candidate_p = self._opt.get('candidate_p') #[50000, 30000, 20000]
+
+        #评估结果路径
         self._opt['eval_res_path'] = self._opt['eval_res_path'].format(
             factorizer=self._opt['factorizer'],
             data_type=self._opt['data_type'],
             alias=self._opt['alias'],
             epoch_idx='{epoch_idx}'
         )
+
+        # 主体：模型
         self._factorizer = setup_factorizer(opt)
+
+        # tensorboard路径
         self._opt['tensorboard'] = self._opt['tensorboard'].format(
             factorizer=self._opt['factorizer'],
             data_type=self._opt['data_type'],
         )
+
         self._writer = SummaryWriter(log_dir='{}/{}'.format(self._opt['tensorboard'], opt['alias']))
         self._writer.add_text('option', str(opt), 0)
         self._mode = None
@@ -104,6 +119,9 @@ class Engine(object):
 
     @property
     def mode(self):
+        '''
+        mode是干嘛用的？？？@todo
+        '''
         return self._mode
 
     @mode.setter
@@ -112,37 +130,49 @@ class Engine(object):
         self._mode = new_mode
 
     def save_pruned_embedding(self, param, step_idx):
-        max_candidate_p = max(self.candidate_p)
+        '''
+        训练的时候，调用；retrain的时候不调用
+        @param param：非空参数数量
+        '''
+        max_candidate_p = max(self.candidate_p) #5w
         if max_candidate_p == 0:
             print("Minimal target parameters achieved, stop pruning.")
             exit(0)
-        else:
-            if param <= max_candidate_p:
-                embedding = self._factorizer.model.get_embedding()
-                emb_save_path = self._opt['emb_save_path'].format(num_parameter=param)
-                emb_save_dir, _ = os.path.split(emb_save_path)
-                if not os.path.exists(emb_save_dir):
-                    os.makedirs(emb_save_dir)
-                np.save(emb_save_path, embedding)
-                max_idx = self.candidate_p.index(max(self.candidate_p))
-                self.candidate_p[max_idx] = 0
-                print("*" * 80)
-                print("Reach the target parameter: {}, save embedding with size: {}".format(max_candidate_p, param))
-                print("*" * 80)
-            elif step_idx == 0:
-                embedding = self._factorizer.model.get_embedding()
-                emb_save_path = self._opt['emb_save_path'].format(num_parameter='initial_embedding')
-                emb_save_dir, _ = os.path.split(emb_save_path)
-                if not os.path.exists(emb_save_dir):
-                    os.makedirs(emb_save_dir)
-                np.save(emb_save_path, embedding)
-                print("*" * 80)
-                print("Save the initial embedding table")
-                print("*" * 80)
+
+        if param <= max_candidate_p:
+            embedding = self._factorizer.model.get_embedding()
+            emb_save_path = self._opt['emb_save_path'].format(num_parameter=param)
+            emb_save_dir, _ = os.path.split(emb_save_path)
+            if not os.path.exists(emb_save_dir):
+                os.makedirs(emb_save_dir)
+
+            # 保存embedding
+            np.save(emb_save_path, embedding)
+            max_idx = self.candidate_p.index(max(self.candidate_p))
+            self.candidate_p[max_idx] = 0
+
+            print("*" * 80)
+            print("Reach the target parameter: {}, save embedding with size: {}".format(max_candidate_p, param))
+            print("*" * 80)
+        elif step_idx == 0:
+            # 保存第一次的embedding
+            embedding = self._factorizer.model.get_embedding()
+            emb_save_path = self._opt['emb_save_path'].format(num_parameter='initial_embedding')
+            emb_save_dir, _ = os.path.split(emb_save_path)
+            if not os.path.exists(emb_save_dir):
+                os.makedirs(emb_save_dir)
+            np.save(emb_save_path, embedding)
+            print("*" * 80)
+            print("Save the initial embedding table")
+            print("*" * 80)
 
     def train_an_episode(self, max_steps, episode_idx=''):
-        """Train a feature_based recommendation model"""
-        assert self.mode in ['partial', 'complete']
+        """Train a feature_based recommendation model
+        与train方法的区别，见train
+
+        epoch_idx切分成epoch为大单元，step为一个epoch里的小单元
+        """
+        assert self.mode in ['partial', 'complete'] # @todo 这两者有什么区别？？？
 
         print('-' * 80)
         print('[{} episode {} starts!]'.format(self.mode, episode_idx))
@@ -163,15 +193,24 @@ class Engine(object):
             # Prepare status for current step
             status['done'] = False
             status['sampler'] = self._sampler
+
+            # 训练！！！
             train_mf_loss = self._factorizer.update(self._sampler)
             status['train_mf_loss'] = train_mf_loss
 
             # Logging & Evaluate on the Evaluate Set
             if self.mode == 'complete' and step_idx % log_interval == 0:
                 epoch_idx = int(step_idx / self._sampler.num_batches_train)
+
+                # 返回：空的比例和非空参数数量
+                # sparsity：为了print而已
+                # params： 有其它用处
                 sparsity, params = self._factorizer.model.calc_sparsity()
+
+                # 训练的时候，保存embedding；retrain的时候不保存
                 if not self.retrain:
                     self.save_pruned_embedding(params, step_idx)
+
                 self._writer.add_scalar('train/step_wise/mf_loss', train_mf_loss, step_idx)
                 self._writer.add_scalar('train/step_wise/sparsity', sparsity, step_idx)
 
@@ -187,11 +226,14 @@ class Engine(object):
                     self._writer.add_scalar('train/epoch_wise/sparsity', sparsity, epoch_idx)
                     self._writer.add_scalar('train/epoch_wise/params', params, epoch_idx)
 
+                # retrain的时候
                 if (step_idx % self._sampler.num_batches_train == 0) and (epoch_idx % eval_interval == 0) and self.retrain:
                     print('Evaluate on test ...')
                     start = datetime.now()
                     eval_res_path = self._opt['eval_res_path'].format(epoch_idx=epoch_idx)
                     eval_res_dir, _ = os.path.split(eval_res_path)
+
+                    # 就第一次需要make
                     if not os.path.exists(eval_res_dir):
                         os.makedirs(eval_res_dir)
 
@@ -202,13 +244,17 @@ class Engine(object):
                     if logloss < best_test_result['LogLoss'][0]:
                         best_test_result['LogLoss'][0] = logloss
                         best_test_result['LogLoss'][1] = epoch_idx
+
                     if auc > best_test_result['AUC'][0]:
                         best_test_result['AUC'][0] = auc
                         best_test_result['AUC'][1] = epoch_idx
                         test_flag = 0
                     else:
                         test_flag += 1
+
                     pd.Series(best_test_result).to_csv(eval_res_path)
+
+                    # 打印评估指标start=======================================================
                     print("*" * 80)
                     print("Test AUC: {:4f} | Logloss: {:4f}".format(auc, logloss))
                     end = datetime.now()
@@ -222,6 +268,7 @@ class Engine(object):
                                                                                valid_mf_loss,
                                                                                dur))
                     print("*"*80)
+                    # 打印评估指标end=======================================================
 
             flag = test_flag
             if self.early_stop is not None and flag >= self.early_stop:
@@ -233,6 +280,10 @@ class Engine(object):
                 exit()
 
     def train(self):
+        '''
+        与train_an_episode没看出什么区别来！哈哈哈
+
+        '''
         self.mode = 'complete'
         self.train_an_episode(self._opt['max_steps'])
 

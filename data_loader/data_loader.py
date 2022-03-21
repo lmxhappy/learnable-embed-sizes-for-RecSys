@@ -24,12 +24,15 @@ class FMGenerator(object):
         data_type = opt['data_type']
         category_only = opt['category_only']
         rebuild_cache = opt['rebuild_cache']
+
+        # 3中数据集的batchsize
         self.batch_size_train = opt.get('batch_size_train')
         self.batch_size_valid = opt.get('batch_size_valid')
         self.batch_size_test = opt.get('batch_size_test')
 
         self.opt = opt
 
+        # 不同的数据源
         if data_type == 'criteo':
             dataset = CriteoDataset(data_path+'train.txt', data_path+'cache', rebuild_cache=rebuild_cache)
         elif data_type == 'avazu':
@@ -41,7 +44,9 @@ class FMGenerator(object):
 
         train_length = int(len(dataset) * 0.8)
         valid_length = int(len(dataset) * 0.1)
-        test_length = len(dataset) - train_length - valid_length
+        test_length = len(dataset) - train_length - valid_length # 0.1
+
+        # 切分
         self.train_data, self.valid_data, self.test_data = torch.utils.data.random_split(
                 dataset, (train_length, valid_length, test_length))
 
@@ -52,6 +57,8 @@ class FMGenerator(object):
         self.num_batches_train = math.ceil(len(self.train_data) / self.batch_size_train)
         self.num_batches_valid = math.ceil(len(self.valid_data) / self.batch_size_valid)
         self.num_batches_test = math.ceil(len(self.test_data) / self.batch_size_test)
+
+        # criteo的特征有category的
         if data_type == 'criteo' and category_only:
             self.field_dims = dataset.field_dims[13:]
         else:
@@ -60,6 +67,8 @@ class FMGenerator(object):
         print('\tNum of train records: {}'.format(len(self.train_data)))
         print('\tNum of valid records: {}'.format(len(self.valid_data)))
         print('\tNum of test records: {}'.format(len(self.test_data)))
+
+        # field和features
         print('\tNum of fields: {}'.format(len(self.field_dims)))
         print('\tNum of features: {}'.format(sum(self.field_dims)))
 

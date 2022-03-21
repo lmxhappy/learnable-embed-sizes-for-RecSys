@@ -23,6 +23,7 @@ class PEPEmbedding(nn.Module):
         self.s = self.init_threshold(init)
         self.offsets = np.array((0, *np.cumsum(self.field_dims)[:-1]), dtype=np.long)
 
+        # 初始化weights
         self.v = torch.nn.Parameter(torch.rand(self.feature_num, self.latent_dim))
         torch.nn.init.xavier_uniform_(self.v)
 
@@ -31,9 +32,13 @@ class PEPEmbedding(nn.Module):
             self.init_retrain(opt)
             print("Retrain epoch {}".format(opt['retrain_emb_param']))
 
+        # 映射之后的embedding
         self.sparse_v = self.v.data
 
     def init_retrain(self, opt):
+        '''
+        retrain的时候，初始化
+        '''
         retrain_emb_param = opt['retrain_emb_param']
         sparse_emb = np.load(opt['emb_save_path'].format(num_parameter=retrain_emb_param)+'.npy')
         sparse_emb = torch.from_numpy(sparse_emb)
@@ -53,6 +58,12 @@ class PEPEmbedding(nn.Module):
             self.mask = self.mask.cuda()
 
     def init_threshold(self, init):
+        '''
+
+        定义s的共享粒度。
+
+        self.threshold_type:'feature_dim'
+        '''
         if self.threshold_type == 'global':
             s = nn.Parameter(init * torch.ones(1))
         elif self.threshold_type == 'dimension':
@@ -67,10 +78,17 @@ class PEPEmbedding(nn.Module):
             s = nn.Parameter(init * torch.ones([self.field_num, self.latent_dim]))
         else:
             raise ValueError('Invalid threshold_type: {}'.format(self.threshold_type))
+
         return s
 
     def soft_threshold(self, v, s):
-        if s.size(0) == self.field_num:  # field-wise lambda
+        '''
+        核心方法
+
+        s: shape(4129, 32)
+        self.field_num: 7
+        '''
+        if s.size(0) == self.field_num:  # field-wise lambda： field or field_dim等两种
             field_v = torch.split(v, tuple(self.field_dims))
             concat_v = []
             for i, v in enumerate(field_v):
@@ -80,6 +98,7 @@ class PEPEmbedding(nn.Module):
             concat_v = torch.cat(concat_v, dim=0)
             return concat_v
         else:
+            # 其它类型的，都走这里
             return torch.sign(v) * torch.relu(torch.abs(v) - (self.g(s) * self.gk))
 
     def forward(self, x):

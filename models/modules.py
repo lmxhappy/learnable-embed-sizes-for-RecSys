@@ -38,10 +38,10 @@ class FM(torch.nn.Module):
     def __init__(self, opt):
         super(FM, self).__init__()
         self.use_cuda = opt.get('use_cuda')
-        self.latent_dim = opt['latent_dim']
-        self.field_dims = opt['field_dims']
+        self.latent_dim = opt['latent_dim'] #32
+        self.field_dims = opt['field_dims'] #[ 278    2    7   21 3439   81  301] @todo 什么意思？是说有7个特征field，每个特征field有多少枚举值吗？
 
-        self.feature_num = sum(self.field_dims)
+        self.feature_num = sum(self.field_dims) #4129
         self.embedding = PEPEmbedding(opt)
         self.linear = FeaturesLinear(self.field_dims)  # linear part
         self.fm = FactorizationMachine(reduce_sum=True)
@@ -55,6 +55,9 @@ class FM(torch.nn.Module):
         return score.squeeze(1)
 
     def l2_penalty(self, x, lamb):
+        '''
+        lamb：是lambda的缩写。之所以不用lamda，是因为它是python的关键词。
+        '''
         xv = self.embedding(x)
         xv_sq = xv.pow(2)
         xv_penalty = xv_sq * lamb
@@ -62,12 +65,20 @@ class FM(torch.nn.Module):
         return xv_penalty
 
     def calc_sparsity(self):
-        base = self.feature_num * self.latent_dim
-        non_zero_values = torch.nonzero(self.embedding.sparse_v).size(0)
-        percentage = 1 - (non_zero_values / base)
+        '''
+        就是空参数的数量占比。子类，都继承了该方法。
+
+        返回：空的比例和非空参数数量
+        '''
+        base = self.feature_num * self.latent_dim # 4129 * 32 = 132128
+        non_zero_values = torch.nonzero(self.embedding.sparse_v).size(0) #132083
+        percentage = 1 - (non_zero_values / base) # 1-非空的比例
         return percentage, non_zero_values
 
     def get_threshold(self):
+        '''
+        阈值g(s)
+        '''
         return self.embedding.g(self.embedding.s)
 
     def get_embedding(self):

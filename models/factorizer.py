@@ -14,8 +14,11 @@ def setup_factorizer(opt):
             new_opt[k[3:]] = v
     return FMFactorizer(new_opt)
 
-
 class Factorizer(object):
+    '''
+    这是个什么东西呢？@todo
+
+    '''
     def __init__(self, opt):
         self.opt = opt
         self.clip = opt.get('grad_clip')
@@ -62,16 +65,23 @@ class Factorizer(object):
         return self.model.get_emb_dims()
 
     def update(self, sampler):
+        '''
+        做一些设置。包括重置。没有真正的训练。在子类里，是真正的训练。
+        '''
         if (self.train_step_idx > 0) and (self.train_step_idx % sampler.num_batches_train == 0):
             self.scheduler.step()
 
         self.train_step_idx += 1
 
+        # 设置model为training mode
         self.model.train()
         self.optimizer.zero_grad()
 
 
 class FMFactorizer(Factorizer):
+    '''
+    FM模型相关的
+    '''
     def __init__(self, opt):
         super(FMFactorizer, self).__init__(opt)
         self.opt = opt
@@ -90,6 +100,7 @@ class FMFactorizer(Factorizer):
             use_cuda(True, opt['device_id'])
             self.model.cuda()
 
+        # todo
         self.optimizer = use_optimizer(self.model, opt)
         self.scheduler = ExponentialLR(self.optimizer, gamma=opt['lr_exp_decay'])
 
@@ -115,17 +126,31 @@ class FMFactorizer(Factorizer):
 
     def update(self, sampler):
         """
+        训练！！！
+
         update FM model parameters
         """
+        # 调用父类的方法，做一下简单的设置
         super(FMFactorizer, self).update(sampler)
+
         data, labels = sampler.get_sample('train')
         if self.use_cuda:
             data, labels = data.cuda(), labels.cuda()
+
         prob_preference = self.model.forward(data)
+
+        # 计算loss
         non_reg_loss = self.criterion(prob_preference, labels.float()) / (data.size()[0])
+
+        # l2，且均值一下
         l2_loss = self.model.l2_penalty(data, self.l2_penalty) / (data.size()[0])
         loss = non_reg_loss + l2_loss
+
+        # 计算叶子节点的梯度
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+
+        # parameter update
         self.optimizer.step()
+
         return loss.item()

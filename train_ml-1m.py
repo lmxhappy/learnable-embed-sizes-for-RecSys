@@ -4,7 +4,7 @@ import os
 import random
 import numpy as np
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-torch.backends.cudnn.enabled = True
+torch.backends.cudnn.enabled = False #
 
 if __name__ == '__main__':
     parser = setup_args()
@@ -29,7 +29,7 @@ if __name__ == '__main__':
         ##########################
         ## Devices & Efficiency ##
         ##########################
-        use_cuda=True,
+        use_cuda=False,
         early_stop=40,
         log_interval=1,
         display_interval=500,
@@ -94,9 +94,13 @@ if __name__ == '__main__':
         opt['l2_penalty']
     )
     print(opt['alias'])
+
+    # 设置随机种子
     random.seed(opt['seed'])
     # np.random.seed(opt['seed'])
     torch.manual_seed(opt['seed'])
     torch.cuda.manual_seed_all(opt['seed'])
+
+    # 训练
     engine = Engine(opt)
     engine.train()
